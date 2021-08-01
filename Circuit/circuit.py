@@ -3,23 +3,17 @@ from anytree import Node, RenderTree
 import pickle
 from copy import copy
 
-C = {
-    'left': {
-        'left': 'A',
-        'type': 'AND',
-        'right': 'B',
-    },
-    'type': 'OR',
-    'right': {
-        'left': 'B',
-        'type': 'XOR',
-        'right': 'C'
-    }
-}
-
-
 class CNode:
+    """
+    电路执行树的节点类
+    """
     def __init__(self, gate=None, left_gate=None, right_gate=None, parent=None):
+        """
+        :param gate: 此节点所代表的门（class Gate）实例
+        :param left_gate:  左子节点
+        :param right_gate:  右子节点
+        :param parent: 父节点，若为None则为根节点，代表输出门
+        """
         self.gate = gate
         self.left_gate = left_gate
         self.right_gate = right_gate
@@ -27,23 +21,42 @@ class CNode:
 
 
 class Circuit:
-    def __init__(self, c, garbler_inputs, evaluator_inputs):
-        self.garbler_inputs = garbler_inputs  # p1的输入
-        self.evaluator_inputs = evaluator_inputs  # p2的输入
-        self.c = c  # 电路构造Json表示
-        self.root = None
-        self.gid = 0
-        self.input_labels = {}
-        self.output_table = {}
+    """
+    混淆电路类
+    """
+    def __init__(self, c, garbler_inputs=None, evaluator_inputs=None):
+        """
+        :param c: dict，电路构造的Json表示
+        :param garbler_inputs: list，电路生成者的输入线符号
+        :param evaluator_inputs: list，电路执行者的输入线符号
+        """
+        self.garbler_inputs = garbler_inputs
+        self.evaluator_inputs = evaluator_inputs
+        self.c = c
+        self.root = None  # 电路执行树的根节点
+        self.input_labels = {}  # 电路的输入标签
+        self.output_table = {}   # 电路的输出表：{label：value}
 
     def generate(self):
+        """
+        1.建立电路执行树，将根节点保存至self.root
+        2.生成电路输出表，保存至self.output_table
+        3.清理混淆电路实例，实例中仅保留每个门的混淆表与电路的输出表
+        
+        :return: 1
+        """
         self.root = self.build_tree(self.c, None)
         self.output_table = self.root.gate.output_table
         self.clear()
-        return self.root
+        return 1
 
     def build_tree(self, c, parent):
-        # 此处的c为子电路
+        """
+        递归建立电路执行树
+        :param c: 子电路节点
+        :param parent: 父电路节点
+        :return: 当前节点
+        """
         left_c = c['left']
         right_c = c['right']
         gate_type = c['type']
@@ -63,8 +76,7 @@ class Circuit:
         else:
             right_gate = right_c
 
-        gate = Gate(gate_type, create_left, create_right, self.gid)
-        self.gid += 1
+        gate = Gate(gate_type, create_left, create_right)
 
         if not create_left:
             gate.left_wire = copy(left_gate.gate.output_wire)
@@ -94,74 +106,67 @@ class Circuit:
         return cnode
 
     def execute(self, inputs):
-        output_label = self._iteration(inputs, self.root)
+        """
+        电路执行方法
+        :param inputs: dict，电路输入：{wire sign：label}
+        :return: 电路输出：0 or 1
+        """
+        def iterate(inputs, cnode):
+            if cnode:
+                if isinstance(cnode, str):
+                    return inputs[cnode]
+                else:
+                    key1 = iterate(inputs, cnode.left_gate)
+                    key2 = iterate(inputs, cnode.right_gate)
+                    # print("k1:", key1, "k2", key2)
+
+                    return cnode.gate.degarble(key1, key2)
+
+        output_label = iterate(inputs, self.root)
         output_gate = self.root.gate
+
         return self.output_table[output_label]
 
     def clear(self):
+        """
+        清理混淆电路实例，使实例中仅保留每个门的混淆表与电路的输出表
+        :return: 1
+        """
         def iterate(cnode):
             if cnode:
                 if isinstance(cnode, str):
                     return
                 else:
-                    cnode.gate.clear()
+                    cnode.gate.clear_gate()
                     iterate(cnode.left_gate)
                     iterate(cnode.right_gate)
                     return
+
         iterate(self.root)
 
-        return
-
-    def _iteration(self, inputs, cnode):
-        if cnode:
-            if isinstance(cnode, str):
-                # rint(cnode)
-                return inputs[cnode]
-            else:
-                key1 = self._iteration(inputs, cnode.left_gate)
-                key2 = self._iteration(inputs, cnode.right_gate)
-                # print("k1:", key1, "k2", key2)
-
-                return cnode.gate.degarble(key1, key2)
-
-    # 以下为辅助函数
-    def _inter(self, root, parent):
-        if root:
-            if isinstance(root, str):
-                # print(root)
-                node = Node(root, parent)
-            else:
-                # print(root.gate.gate_type)
-                node = Node(root.gate.gate_type, parent)
-                self._inter(root.left_gate, node)
-                self._inter(root.right_gate, node)
-
-        return node
+        return 1
 
     def show_circuit(self):
-        root = self._inter(self.root, None)
+        """
+        展示电路
+        :return: 1
+        """
+        def iterate(root, parent):
+            if root:
+                if isinstance(root, str):
+                    # print(root)
+                    node = Node(root, parent)
+                else:
+                    # print(root.gate.gate_type)
+                    node = Node(root.gate.gate_type, parent)
+                    iterate(root.left_gate, node)
+                    iterate(root.right_gate, node)
+
+            return node
+
+        root = iterate(self.root, None)
         for pre, fill, node in RenderTree(root):
             print("{}{}".format(pre, node.name))
 
+        return 1
 
-"""
-def inter(root):
-    if root:
-        if isinstance(root, str):
-            print(root)
-        else:
-            print(root.gate.gate_type)
-            inter(root.left_gate)
-            inter(root.right_gate)
-"""
-
-
-def test():
-    c = Circuit(C, ['A', 'B'], ['C'])
-    c.generate()
-    with open('..\\myCircuit.txt', 'wb') as cFile:
-        pickle.dump(c, cFile)
-    # c.show_circuit()
-    # c.execute()
-
-test()
